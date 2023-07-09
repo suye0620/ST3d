@@ -107,6 +107,10 @@ create_SeuratObj_from_AnnData <- function(list_anndata){
   return(new_SeuratObj)
 }
 
+get_positive_mapping <- function(df){
+  return(which(df>0,arr.ind = T))
+}
+
 
 ggplot.theme <- function(...) {
   return(
