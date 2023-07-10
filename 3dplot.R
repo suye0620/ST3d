@@ -21,17 +21,27 @@ library(Seurat)
 # read RDS files
 # ##############################################################################
 rds_dir <- "./rds/"
-new_slices <- list()
-for (rds_file in list.files(rds_dir)) {
-  new_slices[[str_remove(rds_file,".Rds")]] <- readRDS(paste0(rds_dir,rds_file))
+patient2_slices_dir <- paste0(rds_dir,"SCC-Patient2/slices/")
+patient2_align_dir <- paste0(rds_dir,"SCC-Patient2/align/")
+
+# load slices data
+patient2_slices <- list()
+for (rds_file in list.files(patient2_slices_dir)) {
+  patient2_slices[[str_remove(rds_file,".Rds")]] <- readRDS(paste0(patient2_slices_dir,rds_file))
 } 
 
+# load mappings
+patient2_mappings <- list()
+for (rds_file in list.files(patient2_align_dir)) {
+  patient2_mappings[[str_remove(rds_file,".Rds")]] <- readRDS(paste0(patient2_align_dir,rds_file))
+} 
 # patient_2_align01 <- readr::read_csv(paste0(h5ad_dir,"/pi01.csv"),col_names = F)
 # patient_2_align12 <- readr::read_csv(paste0(h5ad_dir,"/pi12.csv"),col_names = F)
+# saveRDS(patient_2_align01,file = ("./rds/patient_2_align01.Rds"))
+# saveRDS(patient_2_align12,file = ("./rds/patient_2_align12.Rds"))
+
 # ##############################################################################
 # 3d plot
-# ##############################################################################
-# ##############################################################################
 # TODO:
 # 1. 绘制3d重建
 # 2. 学习cellchat、spatialchat，跑细胞通讯的结果
@@ -40,8 +50,6 @@ for (rds_file in list.files(rds_dir)) {
 library(plotly)
 library(tidyverse)
 
-saveRDS(patient_2_align01,file = ("./rds/patient_2_align01.Rds"))
-saveRDS(patient_2_align12,file = ("./rds/patient_2_align12.Rds"))
 
 get_nsamples_from_mat <- function(mat,n=200){
   selected_rows <- sample(nrow(mat), n)
@@ -122,7 +130,9 @@ plot_ly(df_plot) %>%
                 mode="lines",
                 name="",showlegend=F)
   })
-  
+
+
+
 
 
 

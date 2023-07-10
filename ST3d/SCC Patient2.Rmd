@@ -1,0 +1,132 @@
+---
+title: "SCC Patient2"
+author: "Ye.S"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+
+# set directory
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+source("../.Rprofile")
+library(tidyverse)
+library(Seurat)
+```
+
+## load 3d data
+
+```{r}
+rds_dir <- "../rds/"
+patient2_slices_dir <- paste0(rds_dir,"SCC-Patient2/slices/")
+patient2_align_dir <- paste0(rds_dir,"SCC-Patient2/align/")
+
+# load slices data
+patient2_slices <- list()
+for (rds_file in list.files(patient2_slices_dir)) {
+  patient2_slices[[str_remove(rds_file,".Rds")]] <- readRDS(paste0(patient2_slices_dir,rds_file))
+} 
+
+# load mappings
+patient2_mappings <- list()
+for (rds_file in list.files(patient2_align_dir)) {
+  patient2_mappings[[str_remove(rds_file,".Rds")]] <- readRDS(paste0(patient2_align_dir,rds_file))
+} 
+```
+
+## Visualization
+
+```{r}
+library(plotly)
+
+# subsample some alignments
+set.seed(666)
+get_nsamples_from_mat <- function(mat,n=200){
+  selected_rows <- sample(nrow(mat), n)
+  selected_matrix <- mat[selected_rows, ]
+  return(selected_matrix)
+}
+list_mappings <- list(
+  "slice0_slice1"=get_positive_mapping(patient2_mappings$patient_2_align01) %>%
+    get_nsamples_from_mat(),
+  "slice1_slice2"=get_positive_mapping(patient2_mappings$patient_2_align12) %>%
+    get_nsamples_from_mat()
+)
+
+
+Alignment_3Dplot <- function(list_slices,list_mappings,
+                             z_scale=10){
+  # draw slices
+  list_df <- vector("list",length = length(list_slices))
+  forloop.counter <- 0
+  
+  for (slice in names(list_slices)) {
+    forloop.counter <- forloop.counter+1
+    df <- cbind(list_slices[[slice]]@images$image@coordinates,
+          list_slices[[slice]]$original_clusters)
+    colnames(df) <- c("x","y","clusters")
+    df$layer <- slice
+    df[[paste0("slice",(forloop.counter-1),"_index")]] <- 1:nrow(df)
+    df$slice <- (forloop.counter-1)
+    df$z <- z_scale*(forloop.counter-1)
+    list_df[[forloop.counter]] <- df
+  }
+  df_plot <- dplyr::bind_rows(list_df)
+  
+  p <- plot_ly(df_plot,type = 'scatter3d') %>% 
+    add_markers(x = ~x, y = ~y, z = ~z,color=~clusters)
+  
+  # draw alignment lines
+  for (mapping in names(list_mappings)){
+    slice_split <- str_split_1(mapping,"_")
+    first_slice <- slice_split[1]
+    second_slice <- slice_split[2]
+    for (m in 1:nrow(list_mappings[[mapping]]) ) {
+      p <- p %>% add_fun(function(plot){
+        plot %>% filter(!!rlang::parse_expr(paste0(first_slice,"_index==",
+                                                   list_mappings[[mapping]][m,1],
+                                                   "|",
+                                                   second_slice,"_index==",
+                                                   list_mappings[[mapping]][m,2]))) %>%
+          add_trace(x = ~x, y = ~y, z = ~z,
+                    line = list(color = 'black', width = 3,dash='longdash'),
+                    mode="lines",
+                    name="",showlegend=F)
+      })
+    }
+  }
+  
+  return(p)
+}
+
+Alignment_3Dplot(list_slices = patient2_slices,list_mappings = list_mappings,
+                 z_scale = 20)
+```
+
+## Analysis of CCC(Cell-to-Cell Communicaiton)
+
+```{r}
+library(SpatialChat)
+
+# SC <- SpatialChat
+levels(patient2_slices[["patient_2_slice_0"]]@meta.data[["original_clusters"]]) <- 1:12
+levels(patient2_slices[["patient_2_slice_1"]]@meta.data[["original_clusters"]]) <- 1:12
+levels(patient2_slices[["patient_2_slice_2"]]@meta.data[["original_clusters"]]) <- 1:12
+SC_patient2_slice0 <- createSpatialChat(object = patient2_slices$patient_2_slice_0,
+                                        group.by = "original_clusters",assay = "Spatial")
+
+```
+
+
+
+
+
+
