@@ -1,0 +1,160 @@
+---
+title: "DLPFC-1"
+author: "Ye.S"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+
+# set directory
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+source("../.Rprofile")
+library(tidyverse)
+library(Seurat)
+```
+
+## Tutorial 1: 10x Visium (DLPFC dataset)
+Here we present our re-analysis of 151676 sample of the dorsolateral prefrontal cortex (DLPFC) dataset. Maynard et al. has manually annotated DLPFC layers and white matter (WM) based on the morphological features and gene markers.
+
+This tutorial demonstrates how to identify spatial domains on 10x Visium data using STAGATE. The processed data are available at https://github.com/LieberInstitute/spatialLIBD. We downloaded the manual annotation from the spatialLIBD package and provided at https://drive.google.com/drive/folders/10lhz5VY7YfvHrtV40MwaqLmWz56U9eBP?usp=sharing.
+
+## load data
+
+```{r}
+options(Seurat.object.assay.version = "v5")
+data_DLPFC_dir <- "../data/DLPFC/data/"
+
+# ##############################################################################
+# * Sample I:   Slice "151507", Slice "151508", Slice “151509”, Slice “151510"    
+# * Sample II:  Slice "151669", Slice "151670", Slice “151671”, Slice “151672"
+# * Sample III: Slice "151673", Slice "151674", Slice “151675”, Slice “151676"
+# ##############################################################################
+
+# Load the required libraries
+library(SpatialChat)
+library(patchwork)
+options(stringsAsFactors = FALSE)
+
+sampleI_ids <- c("151507","151508","151509","151510")
+sampleI_seuratObjs <- list()
+sampleI_scale.factors <- list()
+sampleI_SpatialChatObjs <- list()
+
+
+for (id in sampleI_ids) {
+  sampleI_seuratObjs[[id]] <- Load10X_Spatial(data.dir = paste0(data_DLPFC_dir,id,"/"),
+                              filename = paste0(id,"_filtered_feature_bc_matrix.h5"),
+                              image = Read10X_Image(paste0(data_DLPFC_dir,id,"/"))
+                              )
+  df_GroundTruth <- read.csv(paste0(data_DLPFC_dir,id,"/",id,"_truth.txt"),header = F,sep = "\t")
+  
+  # set idents
+  sampleI_seuratObjs[[id]]$ground_truth <- df_GroundTruth$V2
+  
+  # Normalize Data
+  sampleI_seuratObjs[[id]] <- Seurat::NormalizeData(sampleI_seuratObjs[[id]])
+  
+  # scale.factors
+  scale.factors <- jsonlite::fromJSON(txt = file.path(data_DLPFC_dir,id ,"/", 'scalefactors_json.json'))
+  scale.factors = list(spot.diameter = 65, spot = scale.factors$spot_diameter_fullres)
+  sampleI_scale.factors[[id]] <- scale.factors
+  
+  # create spatialchat
+  sampleI_SpatialChatObjs[[id]] <- createSpatialChat(
+    object = sampleI_seuratObjs[[id]], #Seurat
+    group.by = "ground_truth",
+    datatype = "spatial", 
+    # coordinates = spatial.locs, 
+    scale.factors = scale.factors
+  ) 
+  
+}
+
+# SpatialFeaturePlot(sampleI_seuratObjs[["151507"]], features = "nCount_Spatial") + 
+#   theme(legend.position = "right")
+# # group.by: Name of meta.data column to group the data by
+# SpatialDimPlot(sampleI_seuratObjs[["151508"]],group.by = "ground_truth")
+```
+
+## CCC(cell-to-cell communication) Analysis
+
+```{r}
+# ##############################################################################
+# Part I: Data input & processing and initialization of SpatialChat object
+# ##############################################################################
+
+SpatialChat_dir <- "../../SpatialChat/SpatialChat/"
+source(paste0(SpatialChat_dir,"spatial_temp.R"))
+
+# ##############################################################################
+# Set the ligand-receptor interaction database
+# Our database CellChatDB is a manually curated database of literature-supported ligand-receptor interactions in both human and mouse. CellChatDB in mouse contains 2,021 validated molecular interactions, including 60% of secrete autocrine/paracrine signaling interactions, 21% of extracellular matrix (ECM)-receptor interactions and 19% of cell-cell contact interactions. CellChatDB in human contains 1,939 validated molecular interactions, including 61.8% of paracrine/autocrine signaling interactions, 21.7% of extracellular matrix (ECM)-receptor interactions and 16.5% of cell-cell contact interactions.
+# Users can update CellChatDB by adding their own curated ligand-receptor pairs.Please check our tutorial on how to do it.
+# ##############################################################################
+
+sampleI_SpatialChatObjs[["151507"]]@DB <- CellChatDB.human
+
+# subset the expression data of signaling genes for saving computation cost
+sampleI_SpatialChatObjs[["151507"]] <- subsetData(sampleI_SpatialChatObjs[["151507"]]) # This step is necessary even if using the whole database
+future::plan("multisession", workers = 4) # do parallel
+options(future.globals.maxSize = 1000 * 1024^2)
+
+sampleI_SpatialChatObjs[["151507"]] <- identifyOverExpressedGenes(
+                                        sampleI_SpatialChatObjs[["151507"]], 
+                                        selection.method = "moransi", 
+                                        thresh.p = 0.05)
+sampleI_SpatialChatObjs[["151507"]] <- identifyOverExpressedInteractions(
+                                        sampleI_SpatialChatObjs[["151507"]], 
+                                        variable.both = TRUE)
+nrow(sampleI_SpatialChatObjs[["151507"]]@LR$LRsig)
+
+# saveRDS(sampleI_SpatialChatObjs, file = "../rds/DLPFC-samples/SpatialChat_v2_sampleI.rds")
+
+```
+```{r}
+# ##############################################################################
+# Part II: Inference of cell-cell communication network
+# SpatialChat infers the biologically significant cell-cell communication by assigning each interaction with a probability value and peforming a permutation test. SpatialChat models the probability of cell-cell communication by integrating gene expression with prior known knowledge of the interactions between signaling ligands, receptors and their cofactors using the law of mass action.
+# ##############################################################################
+
+# Compute the communication probability and infer cellular communication network
+library(spatstat.sparse)
+spatialchat <- computeCommunProb(spatialchat, type = "truncatedMean", trim = 0.1, nboot = 100,
+                                 spatial.use.cell = TRUE, distance.use = TRUE, interaction.length = 200,
+                                 scale.distance = 0.011)
+
+spatialchat <- computeAvgCommunProb(spatialchat, nboot = 100)
+# Filter out the cell-cell communication if there are only few number of cells in certain cell groups
+spatialchat <- filterCommunication(spatialchat, min.cells = 10)
+
+## Extract the inferred cellular communication network as a data frame
+df.net <- subsetCommunication(spatialchat)
+
+## Infer the cell-cell communication at a signaling pathway level
+#SpatialChat computes the communication probability on signaling pathway level by summarizing the communication probabilities of all ligands-receptors interactions associated with each signaling pathway.
+
+spatialchat <- computeCommunProbPathway(spatialchat, thresh = 0.05)
+spatialchat@netP$pathways
+spatialchat@netP$pathways.cell
+setdiff(unique(spatialchat@LR$LRsig$pathway_name), spatialchat2@netP$pathways)
+
+spatialchat <- computeCommunField(spatialchat, slot.name = "netP", net.name = NULL, top = 0.8)
+spatialchat <- computeCommunField(spatialchat, slot.name = "netP", net.name = spatialchat@netP$pathways, top = 0.8)
+
+## Calculate the aggregated cell-cell communication network
+#We can calculate the aggregated cell-cell communication network by counting the number of links or summarizing the communication probability. USER can also calculate the aggregated network among a subset of cell groups by setting `sources.use` and `targets.use`.
+spatialchat <- aggregateNet(spatialchat)
+
+saveRDS(spatialchat, file = "SpatialChat_v2_visium_mouse_cortex.rds")
+```
+
+
